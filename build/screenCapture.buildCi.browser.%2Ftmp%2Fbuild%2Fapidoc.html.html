@@ -1,0 +1,221 @@
+<html><head></head><body><div class="apidocDiv">
+<style>
+/*csslint
+*/
+.apidocDiv {
+    background: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+}
+.apidocDiv a[href] {
+    color: #33f;
+    font-weight: bold;
+    text-decoration: none;
+}
+.apidocDiv a[href]:hover {
+    text-decoration: underline;
+}
+.apidocCodeCommentSpan {
+    background: #bbf;
+    color: #000;
+    display: block;
+}
+.apidocCodeKeywordSpan {
+    color: #d00;
+    font-weight: bold;
+}
+.apidocCodePre {
+    background: #eef;
+    border: 1px solid;
+    color: #777;
+    padding: 5px;
+    white-space: pre-wrap;
+}
+.apidocFooterDiv {
+    margin-top: 20px;
+    text-align: center;
+}
+.apidocModuleLi {
+    margin-top: 10px;
+}
+.apidocSectionDiv {
+    border-top: 1px solid;
+    margin-top: 20px;
+}
+.apidocSignatureSpan {
+    color: #777;
+    font-weight: bold;
+}
+</style>
+<h1>api documentation for
+    <a href="https://github.com/unlight/gulp-cssimport#readme">gulp-cssimport (v5.0.0)</a>
+</h1>
+<h4>Parses a CSS file, finds imports, grabs the content of the linked file and replaces the import statement with it.</h4>
+<div class="apidocSectionDiv"><a href="#apidoc.tableOfContents" id="apidoc.tableOfContents"><h1>table of contents</h1></a><ol>
+
+    <li class="apidocModuleLi"><a href="#apidoc.module.gulp-cssimport">module gulp-cssimport</a><ol>
+
+        <li>
+
+            <a class="apidocElementLiA" href="#apidoc.element.gulp-cssimport.gulp-cssimport">
+            function <span class="apidocSignatureSpan"></span>gulp-cssimport
+            <span class="apidocSignatureSpan">(options)</span>
+            </a>
+
+        </li>
+
+    </ol></li>
+
+</ol></div>
+
+<div class="apidocSectionDiv">
+<h1><a href="#apidoc.module.gulp-cssimport" id="apidoc.module.gulp-cssimport">module gulp-cssimport</a></h1>
+
+
+    <h2>
+        <a href="#apidoc.element.gulp-cssimport.gulp-cssimport" id="apidoc.element.gulp-cssimport.gulp-cssimport">
+        function <span class="apidocSignatureSpan"></span>gulp-cssimport
+        <span class="apidocSignatureSpan">(options)</span>
+        </a>
+    </h2>
+    <ul>
+    <li>description and source-code<pre class="apidocCodePre">function cssImport(options) {
+
+	options = deepExtend({}, defaults, options || {});
+
+	if (options.extensions &amp;&amp; !Array.isArray(options.extensions)) {
+		options.extensions = options.extensions.toString().split(",").map(function (x) {
+			return x.trim();
+		});
+	}
+	
+	var stream;
+	var cssCount = 0;
+	
+	function fileContents(vinyl, encoding, callback) {
+
+		if (!stream) {
+			stream = this;
+		}
+		// https://github.com/kevva/import-regex/
+		var regex = '(?:@import)(?:\\s)(?:url)?(?:(?:(?:\\()(["\'])?(?:[^"\')]+)\\1(?:\\))|(["\'])(?:.+)\\2)(?:[A-Z\\s])*)+(?:;)'; //
+eslint-disable-line
+		var importRe = new RegExp(regex, "gi");
+		var match;
+		var file = [];
+		var lastpos = 0;
+		var promises = [];
+		var contents = vinyl.contents.toString();
+		while ((match = importRe.exec(contents)) !== null) {
+			if (options.skipComments) {
+				var matchIndex = match.index;
+				// Check comment symbols 1.
+				var startCommentPosition = contents.lastIndexOf('/*', matchIndex);
+				var endCommentPosition = contents.lastIndexOf('*/', matchIndex);
+				if (!(endCommentPosition &gt; startCommentPosition) &amp;&amp; startCommentPosition !== -1) {
+					continue;
+				}
+				// Check comment symbols 2.
+				var startCommentPosition2 = contents.lastIndexOf('//', matchIndex);
+				var endCommentPosition2 = contents.lastIndexOf('\n', matchIndex);
+				if (startCommentPosition2 &gt; endCommentPosition2 &amp;&amp; startCommentPosition2 !== -1) {
+					continue;
+				}
+			}
+			var match2 = /@import\s+(?:url\()?(.+(?=['"\)]))(?:\))?.*/ig.exec(match[0]);
+			var importPath = trim(match2[1], "'\"");
+			if (!isMatch(importPath, options)) {
+				continue;
+			}
+			file[file.length] = contents.slice(lastpos, match.index);
+			var index = file.length;
+			file[index] = format("importing file %s from %s", importPath, vinyl.relative);
+			lastpos = importRe.lastIndex;
+			// Start resolving.
+			if (++cssCount &gt; options.limit) {
+				stream.emit("error", new Error("Exceed limit. Recursive include?"));
+				return;
+			}
+
+			(function(index) {
+				var result = {index: index, importPath: importPath};
+				if (!isUrl(importPath)) {
+					var pathDirectory = path.dirname(vinyl.path);
+					var importFile = resolveImportFile(pathDirectory, importPath, options.includePaths);
+					if (!importFile) {
+						var err = new Error("Cannot find file '" + importPath + "' from '" + pathDirectory + "' (includePaths: " + options.includePaths
+ + ")");
+						callback(new gutil.PluginError(PLUGIN_NAME, err));
+					}
+					promises.push(readFile(importFile, "utf8").then(function(contents) {
+						result.importFile = importFile;
+						result.contents = contents;
+						return result;
+					}));
+				} else {
+					promises[promises.length] = new Promise(function(resolve, reject) {
+						var req = hh.request(importPath, function (res) {
+							collect(res, function (err, data) {
+								if (err) {
+									return reject(err);
+								}
+								result.contents = data.toString();
+								resolve(result);
+							});
+						});
+						req.on("error", reject);
+						req.end();
+					});
+				}
+			})(index);
+		}
+		// Nothing to import.
+		if (promises.length === 0) {
+			callback(null, vinyl);
+			return;
+		}
+		// Adding trailing piece.
+		file[file.length] = contents.slice(lastpos);
+		// Waiting promises.
+		Promise.all(promises).then(function(results) {
+			for (var i = 0; i &lt; results.length; i++) {
+				var result = results[i];
+				var vfile = new gutil.File({
+					path: result.importFile,
+					contents: new Buffer(result.contents)
+				});
+				(function(result) {
+					results[i] = pify(fileContents)(vfile, null).then(function(vfile) {
+						result.contents = vfile.contents.toString();
+						return result;
+					});
+				})(result);
+			}
+			return Promise.all(results);
+		})
+		.then(function(results) {
+			var iterator = function() {};
+			if (vinyl.sourceMap) {
+				var bundle = new MagicString.Bundle();
+				iterator = function(file, result) {
+					bundle.addSource({
+						filename: result.importPath,
+						content: new MagicString(result.contents)
+					});
+				};
+			}
+			for (var i = 0; i &lt; results.length; i++) {
+				var result = results[i];
+				var index = resul ...</pre></li>
+    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    </ul>
+
+
+</div>
+
+<div class="apidocFooterDiv">
+    [ this document was created with
+    <a href="https://github.com/kaizhu256/node-utility2" target="_blank">utility2</a>
+    ]
+</div>
+</div>
+</body></html>
